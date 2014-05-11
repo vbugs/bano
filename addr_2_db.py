@@ -14,6 +14,8 @@ import time
 import xml.etree.ElementTree as ET
 import xml.sax.saxutils as XSS
 import zipfile
+from unidecode import unidecode
+import difflib
 
 debut_total = time.time()
 def batch_start_log():
@@ -37,6 +39,56 @@ def batch_end_log(nb):
 	whereclause = 'id_batch = {:d}'.format(batch_id)
 	str_query = 'UPDATE batch SET nombre_adresses = {:d} WHERE {:s};'.format(nb,whereclause)
 	cur.execute(str_query)
+class FuzDict(dict):
+        def __init__(self, items = None, cut = .9):
+                super(FuzDict, self).__init__()
+                if items:
+                        self.update(items)
+                self.cut =  cut
+                self._dict_contains = lambda key: \
+                        super(FuzDict,self).__contains__(key)
+                self._dict_getitem = lambda key: \
+                        super(FuzDict,self).__getitem__(key)
+        def _search(self, lookfor, stop_on_first = False):
+                if self._dict_contains(lookfor):
+                        return True, lookfor, self._dict_getitem(lookfor), 1
+                ratio_calc = difflib.SequenceMatcher()
+                ratio_calc.set_seq1(lookfor)
+                b_ratio = 0
+                b_match = None
+                b_key = None
+                for key in self:
+                        try:
+                                ratio_calc.set_seq2(key)
+                        except TypeError:
+                                continue
+                        try:
+                                ratio = ratio_calc.ratio()
+                        except TypeError:
+                                break
+                        if ratio > b_ratio:
+                                b_ratio = ratio
+                                b_key = key
+                                b_match = self._dict_getitem(key)
+                        if stop_on_first and ratio >= self.cut:
+                                break
+                return (
+                        b_ratio >= self.cut,
+                        b_key,
+                        b_match,
+                        b_ratio)
+        def __contains__(self, item):
+                if self._search(item, True)[0]:
+                        return True
+                else:
+                        return False
+        def __getitem__(self, lkf):
+                matched, key, item, ratio = self._search(lkf)
+                if not matched:
+                        raise KeyError(
+                                "'%s'. closest match: '%s' with ratio %.3f"%
+                                        (str(lkf), str(key), ratio))
+                return item
 class Dicts:
 	def __init__(self):
 		self.lettre_a_lettre = {}
@@ -48,7 +100,7 @@ class Dicts:
 		self.chiffres_romains = []
 		self.mot_a_blanc = []
 		self.abrev_titres = {}
-		self.noms_voies = {}
+		self.noms_voies = FuzDict()
 		self.ways_osm = {}
 
 	def load_lettre_a_lettre(self):
@@ -179,12 +231,16 @@ def normalize(s):
 	s = s.upper()				# tout en majuscules
 	s = s.replace('-',' ')		# separateur espace
 	s = s.replace('\'',' ')		# separateur espace
+        s = s.replace(u'\u2019',' ')    # separateur espace
 	s = s.replace('/',' ')		# separateur espace
 	s = s.replace(':',' ')		# separateur deux points
 	s = ' '.join(s.split())		# separateur : 1 espace
-	for l in iter(dicts.lettre_a_lettre):
-		for ll in dicts.lettre_a_lettre[l]:
-			s = s.replace(ll,l)
+	#for l in iter(dicts.lettre_a_lettre):
+	#	for ll in dicts.lettre_a_lettre[l]:
+	#		s = s.replace(ll,l)
+        if type(s) is str:
+                s = s.decode('utf-8')
+        s=unidecode(s)
 	s = s.encode('ascii','ignore')
 	
 	# type de voie
